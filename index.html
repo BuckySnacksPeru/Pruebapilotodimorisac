@@ -25,7 +25,7 @@
       --ctl-radius: 12px;
 
       /* TAMAÑOS (móvil por defecto) */
-      --ctl-size: 65px;                 /* altura/ancho de botones y barra en móvil */
+      --ctl-size: 46px;                 /* altura/ancho de botones y barra en móvil */
       --ctl-gap: 16px;
       --ctl-right: 24px;
       --ctl-bottom: 110px;
@@ -44,10 +44,36 @@
     /* Desktop: barra y botones un poco más compactos */
     @media (min-width:1024px){
       :root{
-        --ctl-size: 52px;
+        --ctl-size: 36px;
         --search-h: var(--ctl-size);
         --search-radius: 24px;
       }
+    }
+
+    .filters.active {
+      transform: translateY(0);
+    }
+
+    /* === [FILTERS] Empuje de controles cuando el panel está abierto === */
+    :root{
+      --filters-shift: 45vh; /* igual a height del panel (.filters) */
+    }
+
+    /* Transición suave de los elementos que se mueven */
+    .filters-toggle,
+    .locate-control,
+    #buckyBrand,
+    .zoom-indicator{
+      transition: transform 0.3s ease;
+      will-change: transform;
+    }
+
+    /* Al abrir el panel, empuja hacia arriba estos 4 elementos */
+    body.filters-open .filters-toggle,
+    body.filters-open .locate-control,
+    body.filters-open #buckyBrand,
+    body.filters-open .zoom-indicator{
+      transform: translateY(calc(-1 * var(--filters-shift)));
     }
 
     /* Panel de filtros */
@@ -130,6 +156,19 @@
       box-shadow: none;
     }
 
+    /* === [SEARCH] Sección: pin-svg === */
+    .search-control .pin{
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 18px;
+      height: 18px;
+      pointer-events: none;
+    }
+    .search-control .pin-body{ fill:#34A853; }     /* verde estilo Maps */
+    .search-control .pin-hole{ fill:#fff; }        /* “agujero” (se ve blanco sobre el input) */
+
     /* Móvil: ocupa todo el ancho menos 24px por lado */
     @media (max-width: 768px){
       .search-control{
@@ -137,18 +176,6 @@
         right: 24px;
         width: var(--search-w-mobile);
       }
-    }
-
-    /* Pin decorativo a la izquierda (no funcional) */
-    .search-control::before{
-      content:"";
-      position:absolute;
-      left: 14px;
-      top: 50%;
-      transform: translateY(-50%) rotate(-45deg);
-      width: 14px; height: 14px;
-      border-radius: 50% 50% 50% 0;
-      background: #34A853; /* verde tipo Maps */
     }
 
     /* El input se comporta como “chip” completo */
@@ -248,26 +275,6 @@
       box-shadow: none !important;
     }
 
-    .filters.hidden { display: none; }
-   
-    /* Botón Filtros (estilo Google Maps) */
-    .filters-toggle {
-      position: absolute;
-      right: var(--ctl-right);
-      bottom: var(--ctl-bottom);              /* 110px del borde inferior */
-      z-index: 1100;
-      width: var(--ctl-size);
-      height: var(--ctl-size);
-      background: var(--ctl-bg);
-      border: 1px solid var(--ctl-border);
-      border-radius: var(--ctl-radius);
-      box-shadow: 0 1px 3px rgba(0,0,0,.2);
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0;
-      cursor: pointer;
-
       /* Oculta el texto visualmente (tu JS sigue leyendo/escribiendo) */
       font-size: 0;
       line-height: 0;
@@ -295,12 +302,6 @@
     .filters-toggle:hover  { background: #f8f9fa; }
     .filters-toggle:active { box-shadow: inset 0 0 0 1px var(--ctl-border); }
 
-    /* Cuando el panel está visible, mueve el botón a la IZQUIERDA del panel
-       para que nunca quede tapado */
-    .filters:not(.hidden) ~ .filters-toggle {
-      right: calc(10px + var(--filters-w) + 10px);
-    }
-
     /* Leyenda */
     .legend {
       position: absolute; bottom: 10px; left: 10px; z-index: 1000;
@@ -311,6 +312,26 @@
 </head>
 <body>
   <div id="map"></div>
+
+  /* === [BRAND] Texto Bucky === */
+  <div id="buckyBrand" style="
+    position:absolute;
+    bottom: var(--ctl-bottom);
+    left: 16px;
+    font: 12px/1.2 var(--font);
+    color:#111;
+    background:transparent;
+    z-index:1100;
+  ">Bucky Snacks</div>
+
+
+  /* === [SEARCH] Sección: pin-svg === */
+  <svg class="pin" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <!-- Cuerpo de la gota -->
+    <path class="pin-body" d="M12 2c-4.2 0-7.5 3.2-7.5 7.2 0 5.4 7.1 12.4 7.4 12.7a.9.9 0 0 0 1.2 0c.3-.3 7.4-7.3 7.4-12.7C20.5 5.2 16.2 2 12 2z"/>
+    <!-- Agujero central -->
+    <circle class="pin-hole" cx="12" cy="9.2" r="2.6"/>
+  </svg>
 
   <!-- Buscador de direcciones o coordenadas -->
   <div class="search-control" role="search">
@@ -341,21 +362,28 @@
     <small id="multiHint" style="display:block;margin-top:6px;color:#666">Ctrl/Cmd + clic para seleccionar varias</small>
   </div>
 
-  <button id="filterToggle" class="filters-toggle" aria-label="Ocultar filtros" title="Filtros">Ocultar filtros</button>
+  <!-- === [FILTERS] Botón Filtros (estado inicial cerrado) === -->
+  <button id="filterToggle" class="filters-toggle" aria-label="Filtros" aria-expanded="false" title="Filtros">Filtros</button>
+
 
 
   <!-- Indicador de zoom -->
   <div class="zoom-indicator">Zoom: <span id="zoomLevel">—</span></div>
 
   <!-- Botón de mi ubicación -->
-  <div class="locate-control"><button id="locateBtn" title="Mi ubicación">◉</button></div>
-
-  <!-- Leyenda simple -->
-  <div class="legend">
-    <div><span style="display:inline-block;width:10px;height:10px;background:#E33111; border-radius:50%; margin-right:6px;"></span>Punto de venta</div>
-    <div><span style="display:inline-block;width:12px;height:12px;border:2px solid #E33111; background: rgba(227,49,17,0.10); margin-right:6px;"></span>Polígono de ruta</div>
-    <div><span style="display:inline-block;width:12px;height:2px;background:#444; display:inline-block; margin-right:6px; vertical-align:middle;"></span>Línea a etiqueta</div>
+  <div class="locate-control">
+    <button id="locateBtn" title="Mi ubicación">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/>
+        <circle cx="12" cy="12" r="3"/>
+        <line x1="12" y1="2" x2="12" y2="6"/>
+        <line x1="12" y1="18" x2="12" y2="22"/>
+        <line x1="2" y1="12" x2="6" y2="12"/>
+        <line x1="18" y1="12" x2="22" y2="12"/>
+      </svg>
+    </button>
   </div>
+
 
   <script>
     let POINTS_URL, POLYS_URL;
@@ -686,17 +714,21 @@
       });
 
        document.getElementById('zoomLevel').textContent = map.getZoom();
-
-      // Toggle del panel de filtros (ocultar/mostrar)
+      
+      /* === [FILTERS] Toggle deslizante + empuje de controles === */
       const filtersEl = document.querySelector('.filters');
       const toggleBtn = document.getElementById('filterToggle');
-      toggleBtn.addEventListener('click', () => {
-        filtersEl.classList.toggle('hidden');
-        toggleBtn.textContent = filtersEl.classList.contains('hidden')
-          ? 'Mostrar filtros'
-          : 'Ocultar filtros';
-      });
       
+      toggleBtn.addEventListener('click', () => {
+        const open = filtersEl.classList.toggle('active');       // anima el panel
+        document.body.classList.toggle('filters-open', open);    // empuja controles
+      
+        // Accesibilidad + UX
+        toggleBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        toggleBtn.title = open ? 'Ocultar filtros' : 'Mostrar filtros';
+        // El botón mantiene el texto "Filtros" (icono visual en CSS)
+      });
+
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 20, attribution: '&copy; OpenStreetMap'
       }).addTo(map);
