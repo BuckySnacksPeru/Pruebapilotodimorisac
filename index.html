@@ -1,0 +1,1184 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Mapa de Rutas — Fuerza de Ventas</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Leaflet local -->
+  <link rel="stylesheet" href="./leaflet.css" />
+  <script src="./leaflet.js"></script>
+  <style>
+    html, body, #map { height: 100%; margin: 0; }
+    :root{
+      /* Base UI */
+      --card-bg: rgba(255,255,255,.95);
+      --accent: #E33111;
+      --label-bg: rgba(0,102,255,.9);
+      --shadow: 0 2px 10px rgba(0,0,0,.15);
+      --radius: 12px;
+      --font: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+
+      /* Controles estilo Maps */
+      --ctl-bg: #fff;
+      --ctl-border: #dadce0;
+      --ctl-icon: #111;
+      --ctl-radius: 12px;
+
+      /* TAMAÑOS (móvil por defecto) */
+      --ctl-size: 65px;                 /* altura/ancho de botones y barra en móvil */
+      --ctl-gap: 16px;
+      --ctl-right: 24px;
+      --ctl-bottom: 110px;
+
+      /* Panel de filtros */
+      --filters-w: clamp(180px,28vw,220px);
+
+      /* Buscador */
+      --search-top: 40px;               /* ⬅️ “ancho de margen superior” que pediste documentar */
+      --search-h: var(--ctl-size);      /* altura del input = altura de botones */
+      --search-radius: 28px;            /* bordes más redondos */
+      --search-w-mobile: calc(100vw - 48px);      /* 24px por lado */
+      --search-w-desktop: clamp(420px,32vw,560px);/* compacto en desktop */
+    }
+
+    /* Desktop: barra y botones un poco más compactos */
+    @media (min-width:1024px){
+      :root{
+        --ctl-size: 52px;
+        --search-h: var(--ctl-size);
+        --search-radius: 24px;
+      }
+    }
+
+    /* Panel de filtros */
+    .filters {
+      position: absolute; 
+      top: 10px; 
+      right: 10px;
+      bottom: 10px;
+      max-height: calc(100vh - 20px);
+      overflow-y: auto;
+      width: var(--filters-w);
+      z-index: 1000;
+      background: var(--card-bg); 
+      padding: 12px; 
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);  
+      font-family: var(--font);
+      backdrop-filter: none;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable both-edges;
+    }
+    .filters h3 { margin: 0 0 8px; font-size: 14px; }
+    .filters label { display: block; margin: 6px 0 4px; font-size: 12px; color: #444; }
+    .filters select { width: 100%; padding: 6px; border-radius: 8px; border: 1px solid #ccc; }
+    .filters .row { display: grid; grid-template-columns: 1fr; gap: 8px; }
+    .filters .actions { display: flex; gap: 8px; margin-top: 8px; }
+    .filters button {
+      border: 0; border-radius: 10px; padding: 8px 10px; cursor: pointer; font-weight: 600;
+    }
+    .btn-apply { background: #005af0; color: #fff; }
+    .btn-clear { background: #eee; color: #333; }
+
+    /* Indicador de zoom */
+    .zoom-indicator {
+      position: absolute; left: 10px; top: 90px; z-index: 1000;
+      background: rgba(255,255,255,.9); border-radius: 8px; padding: 6px 8px;
+      font: 12px/1.2 var(--font); color: #222; box-shadow: var(--shadow);
+    }
+
+    /* Botón "Mi ubicación" en esquina inferior derecha */
+    .locate-control {
+      position: absolute;
+      right: var(--ctl-right);
+      bottom: calc(var(--ctl-bottom) + var(--ctl-size) + var(--ctl-gap)); /* arriba de Filtros */
+      z-index: 1000;
+      background: var(--ctl-bg);
+      border-radius: var(--ctl-radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .locate-control button {
+      border: 1px solid var(--ctl-border);
+      background: var(--ctl-bg);
+      width: var(--ctl-size);
+      height: var(--ctl-size);
+      cursor: pointer;
+      color: var(--ctl-icon);
+    }
+
+    .locate-control button:hover { background: #f2f2f2; }
+    /* === [MAP] Sección: ocultar-zoom-leaflet (fallback) === */
+    .leaflet-control-zoom { 
+      display: none !important; 
+    }
+
+    /* === Buscador “tipo Google Maps” (único objeto) === */
+    .search-control{
+      position: absolute;
+      z-index: 1100;
+      left: 24px;
+      top: var(--search-top);
+      width: var(--search-w-desktop);
+      height: var(--search-h);
+      /* El contenedor NO pinta fondo: el “chip” es el <input> */
+      display: block;
+      padding: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    /* Móvil: ocupa todo el ancho menos 24px por lado */
+    @media (max-width: 768px){
+      .search-control{
+        left: 24px;
+        right: 24px;
+        width: var(--search-w-mobile);
+      }
+    }
+
+    /* Pin decorativo a la izquierda (no funcional) */
+    .search-control::before{
+      content:"";
+      position:absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%) rotate(-45deg);
+      width: 14px; height: 14px;
+      border-radius: 50% 50% 50% 0;
+      background: #34A853; /* verde tipo Maps */
+    }
+
+    /* El input se comporta como “chip” completo */
+    .search-control input{
+      width: 100%;
+      height: var(--search-h);
+      line-height: var(--search-h);
+      border: 0;/* elimina el borde gris */
+      border-radius: var(--search-radius);
+      background: #fff;
+      outline: 1px solid transparent;        /* evita halos raros en focus */
+      font: 15px/1 var(--font);
+      color: #111;
+      box-shadow: 0 1.5px 4px rgba(0,0,0,.18);/* relieve tipo Google Maps */
+      appearance: none; -webkit-appearance: none;
+      background-clip: padding-box;          /* que la sombra respete el radio */
+      overflow: hidden;                      /* recorta contenidos al radio */
+
+      /* padding: espacio para el pin izquierdo y la lupa derecha */
+      padding-left: 38px;               /* texto NO pisa el pin */
+      padding-right: calc(var(--search-h) - 12px);
+    }
+
+    /* La lupa vive DENTRO del input, sin borde propio */
+    .search-control button{
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: calc(var(--search-h) - 12px);
+      height: calc(var(--search-h) - 12px);
+      border: 0;
+      background: transparent;
+      color: var(--ctl-icon);
+      display: grid; place-items: center;
+      cursor: pointer;
+    }
+    .search-control button:hover{ filter: brightness(0.85); }
+    .search-control button:active{ filter: brightness(0.75); }
+
+    /* Lista de sugerencias: pegada debajo, mismo ancho que la barra */
+    .search-control 
+    /* Sugerencias debajo del buscador */
+    .search-results{
+      position: absolute;
+      left: 24px;
+      top: calc(var(--search-top) + var(--search-h) + 8px);
+      width: var(--search-w-desktop);
+      max-height: 260px;
+      overflow-y: auto;
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 12px;
+      margin: 0; padding: 0;
+      list-style: none;
+      z-index: 1200;
+    }
+
+    @media (max-width: 768px){
+      .search-results{
+        left: 24px; right: 24px;
+        width: var(--search-w-mobile);
+      }
+    }
+    .search-results li{ padding: 10px 12px; cursor: pointer; font-size: 14px; }
+    .search-results li:hover, .search-results li.active{ background:#f2f2f2; }
+
+    /* ——— Pin verde (solo el pin) ——— */
+    .pin-green {
+      width: 18px;
+      height: 18px;
+      background: #4BFD27;           /* color pedido */
+      border-radius: 50% 50% 50% 0;   /* lágrima */
+      transform: rotate(-45deg);
+    }    
+
+    /* Estilos de puntos y etiquetas */
+    .label {
+      background: transparent;
+      color: rgba(0,102,255,0.9);
+      padding: 0 3px;          /* antes: 2px 6px */
+      margin: 0;
+      border-radius: 3px;      /* más pequeño */
+      white-space: nowrap;
+      font: 12px/1.1 var(--font);
+      border: 0;
+      font-weight: bold;
+      box-shadow: none;
+      display: inline-block;   /* caja del tamaño del texto */
+      pointer-events: none;
+    }
+
+    /* por si Leaflet inyecta clase base del divIcon */
+    .leaflet-div-icon {
+      background: transparent !important;
+      border: 0 !important;
+      box-shadow: none !important;
+    }
+
+    .filters.hidden { display: none; }
+   
+    /* Botón Filtros (estilo Google Maps) */
+    .filters-toggle {
+      position: absolute;
+      right: var(--ctl-right);
+      bottom: var(--ctl-bottom);              /* 110px del borde inferior */
+      z-index: 1100;
+      width: var(--ctl-size);
+      height: var(--ctl-size);
+      background: var(--ctl-bg);
+      border: 1px solid var(--ctl-border);
+      border-radius: var(--ctl-radius);
+      box-shadow: 0 1px 3px rgba(0,0,0,.2);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      cursor: pointer;
+
+      /* Oculta el texto visualmente (tu JS sigue leyendo/escribiendo) */
+      font-size: 0;
+      line-height: 0;
+      color: var(--ctl-icon);       /* MISMO color que la lupa */
+      text-shadow: none;
+      font-family: var(--font);
+    }
+
+
+    /* Ícono de embudo que hereda color y escala con el botón */
+    .filters-toggle::before {
+      content: "";
+      display: block;
+      width: 56%;                     /* ~proporción del icono respecto al botón */
+      height: 56%;
+      background: currentColor;       /* usa --ctl-icon */
+      -webkit-mask: url('data:image/svg+xml;utf8,\
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">\
+    <path d="M3 4h18L14 12v6l-4 2v-8L3 4z"/></svg>') no-repeat center / contain;
+              mask: url('data:image/svg+xml;utf8,\
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">\
+    <path d="M3 4h18L14 12v6l-4 2v-8L3 4z"/></svg>') no-repeat center / contain;
+    }
+
+    .filters-toggle:hover  { background: #f8f9fa; }
+    .filters-toggle:active { box-shadow: inset 0 0 0 1px var(--ctl-border); }
+
+    /* Cuando el panel está visible, mueve el botón a la IZQUIERDA del panel
+       para que nunca quede tapado */
+    .filters:not(.hidden) ~ .filters-toggle {
+      right: calc(10px + var(--filters-w) + 10px);
+    }
+
+    /* Leyenda */
+    .legend {
+      position: absolute; bottom: 10px; left: 10px; z-index: 1000;
+      background: var(--card-bg); padding: 8px 10px; border-radius: 8px;
+      box-shadow: var(--shadow); font: 12px var(--font);
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <!-- Buscador de direcciones o coordenadas -->
+  <div class="search-control" role="search">
+    <input id="searchBox" type="search" placeholder="Buscar ubicación aquí" aria-label="Buscar" />
+    <!-- Botón de búsqueda con icono SVG minimalista -->
+    <button id="searchGo" type="button" title="Buscar" aria-label="Buscar">
+      <svg class="icon-search" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="2" />
+        <line x1="16.5" y1="16.5" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+      </svg>
+    </button>
+        <!-- Lista de sugerencias dinámicas -->
+    <ul id="searchResults" class="search-results" role="listbox"></ul>
+  </div>
+
+
+  <!-- Panel de filtros -->
+  <div class="filters">
+    <h3>Filtros</h3>
+      <div class="row">
+        <label for="f-ruta">Rutas <small id="rutaVisibleCount" aria-live="polite" style="color:#6b7280;font-weight:600;"></small></label>
+        <select id="f-ruta" multiple></select>
+      </div>
+    <div class="actions">
+      <button class="btn-apply" id="applyFilters">Aplicar</button>
+      <button class="btn-clear" id="clearFilters">Limpiar</button>
+    </div>
+    <small id="multiHint" style="display:block;margin-top:6px;color:#666">Ctrl/Cmd + clic para seleccionar varias</small>
+  </div>
+
+  <button id="filterToggle" class="filters-toggle" aria-label="Ocultar filtros" title="Filtros">Ocultar filtros</button>
+
+
+  <!-- Indicador de zoom -->
+  <div class="zoom-indicator">Zoom: <span id="zoomLevel">—</span></div>
+
+  <!-- Botón de mi ubicación -->
+  <div class="locate-control"><button id="locateBtn" title="Mi ubicación">◉</button></div>
+
+  <!-- Leyenda simple -->
+  <div class="legend">
+    <div><span style="display:inline-block;width:10px;height:10px;background:#E33111; border-radius:50%; margin-right:6px;"></span>Punto de venta</div>
+    <div><span style="display:inline-block;width:12px;height:12px;border:2px solid #E33111; background: rgba(227,49,17,0.10); margin-right:6px;"></span>Polígono de ruta</div>
+    <div><span style="display:inline-block;width:12px;height:2px;background:#444; display:inline-block; margin-right:6px; vertical-align:middle;"></span>Línea a etiqueta</div>
+  </div>
+
+  <script>
+    let POINTS_URL, POLYS_URL;
+
+    // Función para cargar la configuración
+    async function loadConfig() {
+      try {
+        const response = await fetch('./config.json');
+        const config = await response.json();
+        
+        POINTS_URL = encodeURI(`./data/${config.client_prefix}_PuntosPublicos_${config.now}.geojson`);
+        POLYS_URL = encodeURI(`./data/${config.client_prefix}_PoligonosPublicos_${config.now}.geojson`);
+        
+        // Llamamos a la función que depende de estas variables
+        initializeMap(config.web || {});
+      } catch (error) {
+        console.error('Error cargando configuración:', error);
+      }
+    }
+
+       // Función que contiene todo tu código que depende de las URLs
+       function initializeMap(WEB = {}) {
+         const ZOOM_SHOW_POLYGONS = Number.isFinite(WEB.zoom_show_polygons) ? WEB.zoom_show_polygons : 15;
+         const ZOOM_SHOW_LABELS   = Number.isFinite(WEB.zoom_show_labels)   ? WEB.zoom_show_labels   : 18;
+
+       // Crear mapa base con vista inicial robusta
+       const DEFAULT_CENTER = (Array.isArray(WEB.map_center) && WEB.map_center.length === 2)
+         ? [WEB.map_center[0], WEB.map_center[1]]
+         : [-12.046374, -77.042793]; // Lima, por defecto
+       const DEFAULT_ZOOM = Number.isFinite(WEB.zoom_initial) ? WEB.zoom_initial : 12;
+
+       /* === [PERF] Sección: mapa preferCanvas y sin zoomControl === */
+       const map = L.map('map', {
+         zoomControl: false,          // sin +/- nativos
+         preferCanvas: true           // render vectorial en Canvas (mejor perf)
+       }).setView(DEFAULT_CENTER, DEFAULT_ZOOM);
+
+       /* === [PERF] Sección: renderer canvas para puntos === */
+       const canvasRenderer = L.canvas({ padding: 0.5 }); // reduce repintados en pan/zoom
+
+
+      /* === [SEARCH] Sección: lógica buscador === */
+      let searchMarker = null;
+      let abortCtrl = null;
+      let activeIndex = -1;
+
+      const input = document.getElementById('searchBox');       // ya existe en HTML
+      const resultsEl = document.getElementById('searchResults'); // añadida en HTML arriba
+
+
+      /* === [SEARCH] Sección: icono pin rojo estilo Google === */
+      const greenIcon = L.divIcon({
+        className: 'search-pin',          // clase neutra (sin estilos externos)
+        html: `
+          <svg width="28" height="42" viewBox="0 0 28 42" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+            <!-- cuerpo del pin -->
+            <path d="M14 0C7.4 0 2 5.1 2 11.6c0 8.6 10.6 21.1 11.1 21.7a1 1 0 0 0 1.6 0C15.4 32.7 26 20.2 26 11.6 26 5.1 20.6 0 14 0z" fill="#EA4335" style="filter: drop-shadow(0 1px 1px rgba(0,0,0,.25));"/>
+
+            <!-- círculo blanco interior -->
+            <circle cx="14" cy="11" r="4.5" fill="#fff"/>
+          </svg>
+        `,
+        iconSize: [28, 42],               // tamaño similar al de Google
+        iconAnchor: [14, 42],              // la punta del pin
+        popupAnchor: [0, -36]              // por si abres popups
+      });
+
+
+      // Debounce helper
+      function debounce(fn, delay=500) {
+        let timer;
+        return (...args) => {
+          clearTimeout(timer);
+          timer = setTimeout(() => fn(...args), delay);
+        };
+      }
+
+      /* === [SEARCH] Sección: parseo de coordenadas robusto === */
+      function parseCoords(txt) {
+        const cleaned = String(txt).trim().replace(/;/g, ',').replace(/\s+/g, '');
+        const parts = cleaned.split(',');
+        if (parts.length !== 2) return null;
+
+        const a = parseFloat(parts[0]);
+        const b = parseFloat(parts[1]);
+        if (Number.isNaN(a) || Number.isNaN(b)) return null;
+
+        const inLat = (v) => v >= -90 && v <= 90;
+        const inLon = (v) => v >= -180 && v <= 180;
+
+        // Casos no ambiguos
+        if (inLat(a) && inLon(b) && !inLon(a)) return [a, b];       // a fuera de lon típico → lat,lon
+        if (inLon(a) && inLat(b) && !inLat(a)) return [b, a];       // a fuera de lat típico → lon,lat
+
+        // Casos ambiguos: heurística general (|lon| suele ser > |lat| en la mayoría de lugares)
+        if (inLat(a) && inLon(b) && inLon(a) && inLat(b)) {
+          return (Math.abs(a) < Math.abs(b)) ? [a, b] : [b, a];
+        }
+
+        // Último intento: si solo una pareja lat/lon es válida
+        if (inLat(a) && inLon(b)) return [a, b];
+        if (inLat(b) && inLon(a)) return [b, a];
+
+        return null;
+      }
+
+      // Render sugerencias
+      function renderResults(items) {
+        resultsEl.innerHTML = '';
+        activeIndex = -1; // al dibujar una nueva lista, ningún item está seleccionado
+
+        if (!items || !items.length) {
+          resultsEl.innerHTML = '<li>Sin resultados</li>';
+          return;
+        }
+
+        items.forEach((it) => {
+          const li = document.createElement('li');
+          // nombre corto + contexto (barrio/ciudad/país) cuando esté disponible
+          const addr = it.address || {};
+          const ctx = [addr.suburb, addr.city || addr.town || addr.village, addr.country]
+            .filter(Boolean).join(', ');
+          li.textContent = ctx ? `${it.display_name.split(',')[0]} — ${ctx}` : it.display_name;
+          li.setAttribute('role', 'option');
+          li.addEventListener('click', () => selectResult(it));
+          resultsEl.appendChild(li);
+        });
+      }
+
+      /* === [SEARCH] Sección: navegación de resultados === */
+      function setActive(idx) {
+        const lis = Array.from(resultsEl.querySelectorAll('li'));
+        lis.forEach(li => li.classList.remove('active'));
+        if (idx >= 0 && idx < lis.length) {
+          lis[idx].classList.add('active');
+          lis[idx].scrollIntoView({ block: 'nearest' });
+        }
+        activeIndex = idx;
+      }
+
+      // Selección de resultado
+      function selectResult(item) {
+        resultsEl.innerHTML = '';
+        input.value = item.display_name || '';
+        const lat = parseFloat(item.lat), lon = parseFloat(item.lon);
+        placeMarker([lat, lon], item.boundingbox);
+      }
+
+      /* === [SEARCH] Sección: colocar marcador === */
+      function placeMarker(latlng, bbox) {
+        if (searchMarker) map.removeLayer(searchMarker);
+        searchMarker = L.marker(latlng, { icon: greenIcon }).addTo(map);
+
+        if (bbox && bbox.length === 4) {
+          const minLat = parseFloat(bbox[0]);
+          const maxLat = parseFloat(bbox[1]);
+          const minLon = parseFloat(bbox[2]);
+          const maxLon = parseFloat(bbox[3]);
+          const bounds = L.latLngBounds([minLat, minLon], [maxLat, maxLon]);
+          if (bounds.isValid()) {
+            map.fitBounds(bounds, { padding: [20, 20] });
+            return;
+          }
+        }
+        map.setView(latlng, Math.max(map.getZoom(), 17));
+      }
+
+
+      /* === [SEARCH] Sección: búsqueda con control de rate limit === */
+      const doSearch = debounce(async (query) => {
+        if (abortCtrl) abortCtrl.abort();
+        abortCtrl = new AbortController();
+
+        const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(query)}&addressdetails=1&limit=6&accept-language=es`;
+
+        let attempts = 0;
+        while (attempts < 3) {
+          try {
+            const res = await fetch(url, { signal: abortCtrl.signal });
+            if (res.status === 429) {
+              // pequeño aviso + backoff incremental: 600ms, 1200ms
+              resultsEl.innerHTML = '<li>Demasiadas peticiones, reintentando…</li>';
+              await new Promise(r => setTimeout(r, 600 * (attempts + 1)));
+              attempts++;
+              continue;
+            }
+            if (!res.ok) throw new Error('network');
+            const data = await res.json();
+            renderResults(Array.isArray(data) ? data : []);
+            return;
+          } catch (e) {
+            if (e.name === 'AbortError') return; // nueva búsqueda reemplazó a la anterior
+            attempts++;
+            if (attempts >= 3) {
+              resultsEl.innerHTML = '<li>Error de red, intenta de nuevo</li>';
+              return;
+            }
+            await new Promise(r => setTimeout(r, 400));
+          }
+        }
+      }, 500);
+
+      /* === [SEARCH] Sección: geocode inmediato (Enter/Lupa) === */
+      async function geocodeAndPlaceNow(query) {
+            // Si llega coordenada, pin directo
+            const coords = parseCoords(query);
+            if (coords) {
+              resultsEl.innerHTML = '';
+              placeMarker(coords);
+              return;
+            }
+      
+            // Cancelar búsqueda anterior (si la hay)
+            if (abortCtrl) abortCtrl.abort();
+            abortCtrl = new AbortController();
+      
+            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&addressdetails=1&limit=1&accept-language=es`;
+      
+            let attempts = 0;
+            while (attempts < 3) {
+              try {
+                const res = await fetch(url, { signal: abortCtrl.signal });
+                // Control simple de rate limit
+                if (res.status === 429) {
+                  attempts++;
+                  await new Promise(r => setTimeout(r, 400 * attempts));
+                  continue;
+                }
+                if (!res.ok) throw new Error('network');
+
+                const data = await res.json();
+                const item = Array.isArray(data) && data.length ? data[0] : null;
+
+                if (item) {
+                  // Reutilizamos tu flujo existente que coloca pin y ajusta vista
+                  selectResult(item);
+                } else {
+                  resultsEl.innerHTML = '<li>Sin resultados</li>';
+                }
+                return;
+              } catch (e) {
+                if (e.name === 'AbortError') return; // nueva búsqueda reemplazó a la anterior
+                attempts++;
+                if (attempts >= 3) {
+                  resultsEl.innerHTML = '<li>Error de red, intenta de nuevo</li>';
+                  return;
+                }
+                await new Promise(r => setTimeout(r, 400 * attempts));
+              }
+            }
+      }
+
+
+      // Click en el botón de búsqueda
+      document.getElementById('searchGo').addEventListener('click', () => {
+        const val = input.value.trim();
+        if (!val) { resultsEl.innerHTML = ''; return; }
+        const coords = parseCoords(val);
+        if (coords) {
+          resultsEl.innerHTML = '';
+          placeMarker(coords);
+        } else {
+          geocodeAndPlaceNow(val); // búsqueda directa por texto → pin inmediato (toma primer resultado)
+        }
+      });
+
+      /* === [SEARCH] Sección: teclado (↑/↓/Enter/Escape) === */
+      input.addEventListener('keydown', (e) => {
+        const lis = Array.from(resultsEl.querySelectorAll('li'));
+
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          if (!lis.length) return;
+          setActive(Math.min(activeIndex + 1, lis.length - 1));
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          if (!lis.length) return;
+          setActive(Math.max(activeIndex - 1, 0));
+          return;
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const val = input.value.trim();
+          const coords = parseCoords(val);
+          if (coords) {
+            resultsEl.innerHTML = '';
+            placeMarker(coords);
+            return;
+          }
+          if (activeIndex >= 0 && activeIndex < lis.length) {
+            lis[activeIndex].click();
+            return;
+          }
+          if (val) geocodeAndPlaceNow(val); // enter con texto → pin inmediato (primer resultado)
+          return;
+        }
+        if (e.key === 'Escape') {
+          resultsEl.innerHTML = '';
+          return;
+        }
+        // al teclear algo distinto, resetea selección activa
+        activeIndex = -1;
+      });
+
+
+      /* === [SEARCH] Sección: input en vivo (sugerencias con 1s) === */
+      input.addEventListener('input', () => {
+            const val = input.value.trim();
+            if (!val) { resultsEl.innerHTML = ''; return; }
+
+            // Si parece coordenada, no mostramos sugerencias en vivo (se coloca con Enter/lupa)
+            const coords = parseCoords(val);
+            if (coords) { resultsEl.innerHTML = ''; return; }
+
+            // Autocompletar con retardo de 1 s (ya configurado arriba)
+            doSearch(val);
+      });
+
+      /* === [SEARCH] Sección: click fuera cierra la lista === */
+      document.addEventListener('click', (ev) => {
+            const box = document.querySelector('.search-control');
+            if (box && !box.contains(ev.target)) {
+              resultsEl.innerHTML = '';
+              activeIndex = -1;
+            }
+      });
+
+       document.getElementById('zoomLevel').textContent = map.getZoom();
+
+      // Toggle del panel de filtros (ocultar/mostrar)
+      const filtersEl = document.querySelector('.filters');
+      const toggleBtn = document.getElementById('filterToggle');
+      toggleBtn.addEventListener('click', () => {
+        filtersEl.classList.toggle('hidden');
+        toggleBtn.textContent = filtersEl.classList.contains('hidden')
+          ? 'Mostrar filtros'
+          : 'Ocultar filtros';
+      });
+      
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 20, attribution: '&copy; OpenStreetMap'
+      }).addTo(map);
+
+        // Capas contenedoras
+      let polygonsLayer;                      // GeoJSON de polígonos (cada feature con props.Ruta)
+      const pointsLayer = L.featureGroup();     // Círculos de puntos
+      const labelsLayer = L.layerGroup();     // Etiquetas HTML
+      const linesLayer  = L.layerGroup();     // Líneas punto ↔ etiqueta
+  
+      // Datos en memoria
+      let allPointFeatures = [];  // features de puntos
+      let allPolyFeatures  = [];  // features de polígonos
+      const labelItems     = [];  // [{marker, labelMarker, line, props, lat, lng}, ...]
+  
+      // Indicador de zoom
+      const zoomLevelEl = document.getElementById('zoomLevel');
+      function updateZoomIndicator() { zoomLevelEl.textContent = map.getZoom(); }
+  
+      // Utilidades de selects
+      function selectedValues(sel) {
+        return Array.from(sel.selectedOptions).map(o => o.value);
+      }
+
+      // Normaliza etiquetas de ruta para comparar/ordenar sin ambigüedades
+      // "Ruta 01" / "ruta1" / " RUTA 1 "  ->  "ruta 1"
+      function normRuta(raw) {
+        const s = String(raw ?? '').trim().toLowerCase();
+        if (!s) return '';
+        const m = s.match(/(\d+)/);                // primer número que aparezca
+        if (m) return `ruta ${parseInt(m[1], 10)}`; // elimina ceros a la izquierda
+        return s.replace(/\s+/g, ' ');             // texto sin números: compacta espacios
+      }
+      // Cargar polígonos
+      fetch(POLYS_URL)
+        .then(r => r.json())
+        .then(geo => {
+          allPolyFeatures = geo.features || [];
+          polygonsLayer = L.geoJSON(geo, {
+            style: () => ({ color: '#E33111', weight: 2, fillColor: '#E33111', fillOpacity: 0.10 })
+          }).addTo(map);
+          // ✅ Por defecto, todos pasan el filtro hasta que el usuario aplique algo
+          polygonsLayer.eachLayer(layer => { layer._visibleByFilter = true; });
+  
+          if (polygonsLayer.getLayers().length > 0) {
+            map.fitBounds(polygonsLayer.getBounds(), { padding: [20,20] });
+          }
+          togglePolygonsByZoom();
+        })
+        .catch(err => console.error('Error cargando polígonos:', err));
+  
+      // Cargar puntos y construir marcadores + etiquetas + líneas
+      fetch(POINTS_URL)
+        .then(r => r.json())
+        .then(geo => {
+          allPointFeatures = geo.features || [];
+  
+          for (const f of allPointFeatures) {
+            if (!f || !f.geometry || !f.geometry.coordinates) continue;
+            const [lng, lat] = f.geometry.coordinates;
+            const props = f.properties || {};
+            const idText = String(props.ID ?? '');
+  
+            /* === [PERF] Sección: puntos en Canvas === */
+            // Punto
+            const marker = L.circleMarker([lat, lng], {
+              renderer: canvasRenderer,             // <- Canvas acelera muchísimo frente a SVG
+              radius: 5,
+              color: '#E33111',
+              weight: 2,
+              fillColor: '#E33111',
+              fillOpacity: 0.9,
+              bubblingMouseEvents: false            // evita propagaciones innecesarias
+            }).addTo(pointsLayer);
+
+            // Etiqueta (como divIcon)
+            const labelMarker = L.marker([lat, lng], {
+              interactive: false,
+              icon: L.divIcon({ className: 'label', html: idText, iconSize: null, iconAnchor: [0, 0] })
+            }).addTo(labelsLayer);
+  
+            // Línea punto ↔ etiqueta (se actualizará en pantalla)
+            const line = L.polyline([[lat, lng], [lat, lng]], { color: 'rgba(0,102,255,0.9)', weight: 1, opacity: 1 })
+              .addTo(linesLayer);
+  
+            labelItems.push({ marker, labelMarker, line, props, lat, lng });
+          }
+  
+          pointsLayer.addTo(map);
+          /* === [PERF] Sección: etiquetas on-demand por zoom === */
+          toggleLabelsByZoom();    // monta/oculta etiquetas y líneas según ZOOM_SHOW_LABELS
+
+  
+          // Si no hubo polígonos, centra con puntos
+          if (!polygonsLayer || polygonsLayer.getLayers().length === 0) {
+            const b = pointsLayer.getBounds();
+            if (b.isValid()) map.fitBounds(b, { padding: [20, 20] });
+          }
+  
+          // Posicionamiento de etiquetas con offset en píxeles (y línea)
+          
+  
+  
+          // ==== Recolocación inteligente de etiquetas (sin solaparse) ====
+          //const SPIRAL_RADII = [18, 24, 30, 36, 42, 50]; // radios en px
+          const SPIRAL_RADII = [14, 18, 22, 28, 34, 40];
+          const SPIRAL_DIRS = [
+            {x: 1, y:-1}, // NE  ← primera opción (diagonal)
+            {x:-1, y:-1}, // NO
+            {x: 1, y: 1}, // SE
+            {x:-1, y: 1}, // SO
+            {x: 0, y:-1}, // N
+            {x: 1, y: 0}, // E
+            {x: 0, y: 1}, // S
+            {x:-1, y: 0}  // O
+          ];
+          const CANDIDATE_OFFSETS = (function(){
+            const out = [];
+            for (const r of SPIRAL_RADII) for (const d of SPIRAL_DIRS) out.push({x: d.x * r, y: d.y * r});
+            return out;
+          })();
+  
+          // Tamaño del label (si aún no renderiza, aproximamos por longitud del texto)
+          function getLabelSize(item) {
+            const el = item.labelMarker.getElement();
+            if (el && el.offsetWidth && el.offsetHeight) return { w: el.offsetWidth, h: el.offsetHeight };
+            const text = String(item.props?.ID ?? '');
+            const w = Math.max(18, text.length * 7 + 12); // aproximación: 7px por carácter + padding
+            const h = 18;
+            return { w, h };
+          }
+  
+          function overlaps(a, b) {
+            return !(a.x2 < b.x1 || a.x1 > b.x2 || a.y2 < b.y1 || a.y1 > b.y2);
+          }
+  
+          function placeLabelFor(item, placedBoxes) {
+            const baseLL = L.latLng(item.lat, item.lng);
+            const basePx = map.project(baseLL, map.getZoom());
+            const size   = getLabelSize(item); // {w,h}
+          
+            // Probamos posiciones en espiral (arriba primero). Colocamos en la primera libre.
+            for (const off of CANDIDATE_OFFSETS) {
+              const candPx = L.point(basePx.x + off.x, basePx.y + off.y);   // esquina SUP-IZQ de la etiqueta
+              const candLL = map.unproject(candPx, map.getZoom());
+          
+              // Ubicamos provisionalmente la etiqueta en esa esquina
+              item.labelMarker.setLatLng(candLL);
+          
+              // Caja en píxeles de la etiqueta (para evitar solapes)
+              const box = { x1: candPx.x, y1: candPx.y, x2: candPx.x + size.w, y2: candPx.y + size.h };
+          
+              // ¿choca con alguna ya puesta?
+              let collide = false;
+              for (const b of placedBoxes) { if (overlaps(box, b)) { collide = true; break; } }
+              if (!collide) {
+                placedBoxes.push(box);
+          
+                // PUNTO DE ANCLA DE LA LÍNEA: borde del rectángulo más cercano al punto
+                // Regla: si el label quedó a la derecha (off.x > 0) conecto al borde IZQ;
+                // si quedó a la izquierda, al borde DER. Análogo con arriba/abajo en Y.
+                const attachPx = L.point(
+                  (off.x >= 0 ? box.x1 : box.x2),
+                  (off.y >= 0 ? box.y1 : box.y2)
+                );
+                const attachLL = map.unproject(attachPx, map.getZoom());
+          
+                item.line.setLatLngs([baseLL, attachLL]);  // ¡ahora sí al borde del texto!
+                return;
+              }
+            }
+          
+            // Si ninguna posición quedó libre, usamos la última candidata
+            const lastOff = CANDIDATE_OFFSETS[CANDIDATE_OFFSETS.length - 1];
+            const lastPx  = L.point(basePx.x + lastOff.x, basePx.y + lastOff.y);
+            const lastLL  = map.unproject(lastPx, map.getZoom());
+            item.labelMarker.setLatLng(lastLL);
+          
+            const lastBox = { x1: lastPx.x, y1: lastPx.y, x2: lastPx.x + size.w, y2: lastPx.y + size.h };
+            placedBoxes.push(lastBox);
+          
+            const fallbackAttachPx = L.point(
+              (lastOff.x >= 0 ? lastBox.x1 : lastBox.x2),
+              (lastOff.y >= 0 ? lastBox.y1 : lastBox.y2)
+            );
+            item.line.setLatLngs([baseLL, map.unproject(fallbackAttachPx, map.getZoom())]);
+          }
+  
+  
+          /* === [PERF] Sección: reposicionador con salida temprana === */
+          let rafId = null;
+          function updateAllLabels() {
+            // Si no hay etiquetas visibles por zoom/capa, no hagas trabajo costoso
+            if (map.getZoom() < ZOOM_SHOW_LABELS || !map.hasLayer(labelsLayer)) {
+              toggleLabelsByZoom();   // mantiene la invariantes de visibilidad
+              return;
+            }
+            if (rafId) cancelAnimationFrame(rafId);
+            rafId = requestAnimationFrame(() => {
+              const placed = [];
+              for (const it of labelItems) {
+                if (!map.hasLayer(it.labelMarker)) continue;
+                placeLabelFor(it, placed);
+              }
+              // NOTA: toggleLabelsByZoom() ya se ejecuta en zoomend; aquí no hace falta
+            });
+          }
+
+  
+          // Cargar opciones del filtro RUTA (único) con dedupe, conteo y orden numérico
+          // 1) Normalizamos y contamos PDV por ruta
+          const rutasMap = new Map();   // key norm -> { key, label }
+          const rutaCounts = new Map(); // key norm -> count
+          for (const f of allPointFeatures) {
+            const raw = f?.properties?.Ruta;
+            const key = normRuta(raw);
+            if (!key) continue;
+
+            // etiqueta humana (p.ej., "Ruta 7")
+            if (!rutasMap.has(key)) {
+              const num = key.match(/(\d+)/)?.[1];
+              const label = num ? `Ruta ${num}` : key.charAt(0).toUpperCase() + key.slice(1);
+              rutasMap.set(key, { key, label });
+            }
+
+            // conteo
+            rutaCounts.set(key, (rutaCounts.get(key) || 0) + 1);
+          }
+
+          // 2) Orden: primero las que tienen número (asc), luego las sin número (alfabético)
+          const rutasSorted = [...rutasMap.values()].sort((a, b) => {
+            const an = parseInt(a.key.match(/\d+/)?.[0] ?? 'NaN', 10);
+            const bn = parseInt(b.key.match(/\d+/)?.[0] ?? 'NaN', 10);
+            const aNum = Number.isFinite(an), bNum = Number.isFinite(bn);
+            if (aNum && bNum) return an - bn;
+            if (aNum && !bNum) return -1;
+            if (!aNum && bNum) return 1;
+            return a.label.localeCompare(b.label, 'es', { sensitivity: 'base' });
+          });
+
+          // 3) Pinta el <select> con contador por opción: "Ruta X (n)"
+          const selRutaEl = document.getElementById('f-ruta');
+          const fragRuta = document.createDocumentFragment();
+          for (const r of rutasSorted) {
+            const opt = document.createElement('option');
+            opt.value = r.key; // clave normalizada (p.ej., "ruta 7")
+            const count = rutaCounts.get(r.key) || 0;
+            opt.textContent = `${r.label} (${count})`;
+            // opcional: guarda el conteo como data-* por si lo quieres usar luego
+            opt.dataset.count = String(count);
+            fragRuta.appendChild(opt);
+          }
+          selRutaEl.innerHTML = '';
+          selRutaEl.appendChild(fragRuta);
+
+
+// ——— NUEVO: Poner un mensaje de ayuda distinto en móvil/escritorio ———
+{
+  const hintEl = document.getElementById('multiHint');
+  if (hintEl) {
+    const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    // Mensaje claro y corto para cada tipo de dispositivo
+    hintEl.textContent = isTouch
+      ? 'Toca para seleccionar; vuelve a tocar para quitar. Toca varias y pulsa “Aplicar”.'
+      : 'Ctrl/Cmd + clic para seleccionar varias';
+  }
+}
+
+          // Evita scroll interno del <select>; que el scroll lo haga el panel
+          const maxItems = Math.min(rutasSorted.length, 12);
+          selRutaEl.size = Math.max(maxItems, 4); // 4–12 ítems visibles; el scroll lo hace el panel
+
+          // 4) Inicializa el contador del título: "— N PDV totales"
+          // (aquí usamos el total de features de puntos como referencia inicial)
+          const rutaTitleCounter = document.getElementById('rutaVisibleCount');
+          if (rutaTitleCounter) {
+            rutaTitleCounter.textContent = `— ${allPointFeatures.length} PDV`;
+          }
+
+
+          // Aplicar/limpiar filtros
+          function applyFilters() {
+            // 1) Selecciones del <select> (ya vienen normalizadas: "ruta 1", "ruta 2", ...)
+            const rawSel = selectedValues(document.getElementById('f-ruta'));
+            const selKeys = new Set(rawSel);
+
+            // 2) Mapa de visibilidad por ruta (clave normalizada)
+            const routeVisibility = new Map();
+            let visiblePoints = 0;
+
+
+            // 3) Puntos/etiquetas/líneas
+            for (const it of labelItems) {
+              const p = it.props || {};
+              const pKey = normRuta(p.Ruta);           // ← normaliza la propiedad del GeoJSON
+              const visible = (selKeys.size === 0) || selKeys.has(pKey);
+
+              if (visible) {
+                it.marker.addTo(pointsLayer);
+                it.labelMarker.addTo(labelsLayer);
+                it.line.addTo(linesLayer);
+                if (pKey) routeVisibility.set(pKey, true);
+                visiblePoints++; // ← añade esta línea para contar PDV visibles
+              } else {
+                pointsLayer.removeLayer(it.marker);
+                labelsLayer.removeLayer(it.labelMarker);
+                linesLayer.removeLayer(it.line);
+              }
+            }
+
+            // 4) Polígonos: misma clave normalizada + respetar zoom
+            if (polygonsLayer) {
+              const withinZoom = map.getZoom() >= ZOOM_SHOW_POLYGONS;
+
+              polygonsLayer.eachLayer(layer => {
+                const rutaKey = normRuta(layer.feature?.properties?.Ruta);
+                const passesRutaFilter = (selKeys.size === 0) || selKeys.has(rutaKey);
+                const hasVisiblePoints = !!routeVisibility.get(rutaKey);
+
+                layer._visibleByFilter = passesRutaFilter && hasVisiblePoints;
+                const shouldBeOn = withinZoom && layer._visibleByFilter;
+                if (shouldBeOn) {
+                  layer.addTo(map);
+                } else {
+                  map.removeLayer(layer);
+                }
+              });
+            }
+
+
+            // 5) Actualiza el contador del título con los PDV visibles
+            const rutaTitleCounter = document.getElementById('rutaVisibleCount');
+            if (rutaTitleCounter) {
+              rutaTitleCounter.textContent = `— ${visiblePoints} PDV`;
+            }
+
+            updateAllLabels();
+            togglePolygonsByZoom();
+          }
+
+          
+          function clearFilters() {
+            const sel = document.getElementById('f-ruta');
+            for (const opt of sel.options) opt.selected = false;
+            applyFilters();
+          }
+          document.getElementById('f-ruta').addEventListener('change', applyFilters);
+          document.getElementById('applyFilters').addEventListener('click', applyFilters);
+          document.getElementById('clearFilters').addEventListener('click', clearFilters);
+  
+          /* === [PERF] Sección: listeners livianos === */
+          // Solo en zoom cambiamos visibilidad y recolocamos todo
+          map.on('zoomend', () => {
+            updateZoomIndicator();
+            toggleLabelsByZoom();
+            togglePolygonsByZoom();
+            // Reposiciona etiquetas SOLO si están visibles
+            if (map.getZoom() >= ZOOM_SHOW_LABELS) requestAnimationFrame(updateAllLabels);
+          });
+
+          // En pan solo actualiza indicador y, si las etiquetas están visibles, recoloca
+          map.on('moveend', () => {
+            updateZoomIndicator();
+            if (map.getZoom() >= ZOOM_SHOW_LABELS) requestAnimationFrame(updateAllLabels);
+          });
+
+          // Inicial
+          updateZoomIndicator();
+          updateAllLabels();
+        })
+        .catch(err => console.error('Error cargando puntos:', err));
+  
+      // Mostrar/ocultar polígonos por zoom
+      //function togglePolygonsByZoom() {
+      //  if (!polygonsLayer) return;
+      //  const show = map.getZoom() >= ZOOM_SHOW_POLYGONS;
+      //  polygonsLayer.eachLayer(layer => {
+      //    if (show) layer.addTo(map); else map.removeLayer(layer);
+      //  });
+      //}
+  
+      function togglePolygonsByZoom() {
+        if (!polygonsLayer) return;
+        const withinZoom = map.getZoom() >= ZOOM_SHOW_POLYGONS;
+      
+        polygonsLayer.eachLayer(layer => {
+          // Si nunca se filtró, _visibleByFilter quedará undefined → trátalo como true
+          const visibleByFilter = (layer._visibleByFilter !== false);
+          const shouldBeOn = withinZoom && visibleByFilter;
+      
+          if (shouldBeOn) {
+            layer.addTo(map);
+          } else {
+            map.removeLayer(layer);
+          }
+        });
+      }
+  
+      // Mostrar/ocultar etiquetas por zoom
+      function toggleLabelsByZoom() {
+        const show = map.getZoom() >= ZOOM_SHOW_LABELS;
+        if (show) {
+          if (!map.hasLayer(labelsLayer)) map.addLayer(labelsLayer);
+          if (!map.hasLayer(linesLayer))  map.addLayer(linesLayer);
+        } else {
+          if (map.hasLayer(labelsLayer)) map.removeLayer(labelsLayer);
+          if (map.hasLayer(linesLayer))  map.removeLayer(linesLayer);
+        }
+      }
+  
+      // Botón “mi ubicación” con seguimiento en tiempo real
+      let userMarker = null, userCircle = null;
+      // NUEVO: estado de seguimiento y referencia al botón
+      let following = false;
+      const locateBtn = document.getElementById('locateBtn');
+  
+      //document.getElementById('locateBtn').addEventListener('click', () => {
+       // map.locate({ setView: true, watch: true, enableHighAccuracy: true, maxZoom: 18 });
+      //});
+  
+      locateBtn.addEventListener('click', () => {
+        // Alterna el modo "seguir"
+        following = !following;
+      
+        // (Opcional) Cambia el texto/tooltip del botón
+        locateBtn.title = following ? 'Dejar de seguir mi ubicación' : 'Seguir mi ubicación';
+        // Si quieres también cambiar el contenido del botón, descomenta la siguiente línea:
+        // locateBtn.textContent = following ? '📍 Siguiendo' : '📍';
+      
+        if (following) {
+          // Centra una sola vez cuando llegue el próximo fix
+          map.once('locationfound', (e) => {
+            map.setView(e.latlng, Math.max(map.getZoom(), 17));
+          });
+          // Empieza a seguir en tiempo real, sin re-centrar automáticamente cada actualización
+          map.locate({ setView: false, watch: true, enableHighAccuracy: true, maxZoom: 18 });
+        } else {
+          // Deja de escuchar actualizaciones de ubicación
+          map.stopLocate();
+        }
+      });
+      
+      map.on('locationfound', (e) => {
+        const { latlng, accuracy } = e;
+        // Icono cuadrado azul
+        const blueSquareIcon = L.divIcon({
+          className: '', // sin estilos de leaflet por defecto
+          html: '<div style="width:20px;height:20px;background:#005af0;border-radius:4px;border:2px solid white;"></div>',
+          iconSize: [20, 20],
+          iconAnchor: [10, 10] // para centrar el cuadrado en la ubicación
+        });
+  
+        // Icono circular azul con borde blanco
+        const blueCircleIcon = L.divIcon({
+          className: '', // sin clases base de Leaflet
+          html: '<div style="width:20px;height:20px;background:#005af0;border:5px solid white;border-radius:50%;"></div>',
+          iconSize: [20, 20],
+          iconAnchor: [10, 10] // centra el círculo en la posición
+        });
+        
+        if (!userMarker) {
+          // userMarker = L.marker(latlng).addTo(map);
+          userMarker = L.marker(latlng, { icon: blueCircleIcon }).addTo(map);
+        } else {
+          userMarker.setLatLng(latlng);
+        }
+        if (!userCircle) {
+          userCircle = L.circle(latlng, { radius: accuracy, color: '#3388ff', weight: 1, fillOpacity: 0.15 }).addTo(map);
+        } else {
+          userCircle.setLatLng(latlng);
+          userCircle.setRadius(accuracy);
+        }
+        // NUEVO: solo recentrar si el modo "seguir" está activo
+        if (following) map.panTo(latlng);
+      });
+      map.on('locationerror', () => {
+        alert('No fue posible obtener tu ubicación. Verifica permisos del navegador.');
+      });
+
+    }
+
+    loadConfig();
+  </script>
+</body>
+</html>
